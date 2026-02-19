@@ -1,0 +1,90 @@
+import hashlib
+import os
+import base64
+import time
+
+class HashlockPayment:
+    """
+    Simulates an ILP hashlock payment
+    """
+    
+    def __init__(self):
+        self.secrets = {}  # Store secrets for verification
+        self.conditions = {}  # Store conditions
+        
+    def create_hashlock(self):
+        """
+        Create a hashlock condition and secret
+        Returns condition (public) and secret (private)
+        """
+        # Generate random 32-byte secret
+        secret = os.urandom(32)
+        secret_b64 = base64.urlsafe_b64encode(secret).decode('utf-8')
+        
+        # Create condition (hash of secret)
+        condition = hashlib.sha256(secret).digest()
+        condition_b64 = base64.urlsafe_b64encode(condition).decode('utf-8')
+        
+        # Store for verification
+        payment_id = f"payment_{int(time.time())}"
+        self.secrets[payment_id] = secret_b64
+        self.conditions[payment_id] = condition_b64
+        
+        print(f"\n🔐 Payment ID: {payment_id}")
+        print(f"📌 Condition (public): {condition_b64}")
+        print(f"🔑 Secret (private - DO NOT SHARE): {secret_b64}")
+        
+        return {
+            'payment_id': payment_id,
+            'condition': condition_b64,
+            'secret': secret_b64
+        }
+    
+    def fulfill_hashlock(self, payment_id, provided_secret):
+        """
+        Attempt to fulfill a hashlock by providing the secret
+        """
+        if payment_id not in self.conditions:
+            return {'success': False, 'error': 'Payment not found'}
+        
+        stored_condition = self.conditions[payment_id]
+        
+        # Recreate condition from provided secret
+        secret_bytes = base64.urlsafe_b64decode(provided_secret)
+        calculated_condition = hashlib.sha256(secret_bytes).digest()
+        calculated_b64 = base64.urlsafe_b64encode(calculated_condition).decode('utf-8')
+        
+        # Verify
+        if calculated_b64 == stored_condition:
+            print(f"\n✅ Payment {payment_id} fulfilled successfully!")
+            return {'success': True, 'message': 'Payment released'}
+        else:
+            print(f"\n❌ Invalid secret for payment {payment_id}")
+            return {'success': False, 'error': 'Invalid secret'}
+    
+    def simulate_payment_flow(self):
+        """
+        Simulate a complete payment flow with sender and receiver
+        """
+        print("\n" + "="*60)
+        print("SIMULATING ILP HASHLOCK PAYMENT")
+        print("="*60)
+        
+        # Step 1: Receiver creates a condition
+        print("\n📤 Step 1: Receiver creates condition")
+        payment = self.create_hashlock()
+        
+        # Step 2: Receiver sends condition to sender
+        print("\n📨 Step 2: Receiver sends condition to sender")
+        print(f"   Condition shared: {payment['condition']}")
+        
+        # Step 3: Sender locks funds with condition
+        print("\n💰 Step 3: Sender locks funds using condition")
+        print(f"   Funds locked with condition: {payment['condition'][:20]}...")
+        
+        # Step 4: Receiver fulfills by revealing secret
+        print("\n🔓 Step 4: Receiver fulfills with secret")
+        result = self.fulfill_hashlock(payment['payment_id'], payment['secret'])
+        
+        return result
+
