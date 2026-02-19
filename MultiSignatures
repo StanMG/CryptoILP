@@ -1,0 +1,199 @@
+"""
+Lab 3: Multi-Signature Conditions
+Implement 2-of-3 multi-signature wallet for ILP
+"""
+
+import nacl.signing
+import nacl.encoding
+import hashlib
+import base64
+import json
+import time
+from collections import defaultdict
+
+class MultiSigWallet:
+    """
+    2-of-3 Multi-signature wallet implementation
+    """
+    
+    def __init__(self, wallet_id, required_signatures=2):
+        self.wallet_id = wallet_id
+        self.required = required_signatures
+        self.signers = []  # List of public keys
+        self.approvals = defaultdict(dict)  # Track approvals per transaction
+        
+    def add_signer(self, name, public_key_hex):
+        """Add a signer to the wallet"""
+        self.signers.append({
+            'name': name,
+            'public_key': public_key_hex
+        })
+        print(f"✅ Added signer: {name}")
+        
+    def create_multisig_transaction(self, destination, amount):
+        """
+        Create a transaction requiring multiple signatures
+        """
+        tx_id = hashlib.sha256(
+            f"{destination}{amount}{time.time()}".encode()
+        ).hexdigest()[:16]
+        
+        transaction = {
+            'id': tx_id,
+            'destination': destination,
+            'amount': amount,
+            'timestamp': time.time(),
+            'required_signatures': self.required,
+            'signers': [s['public_key'] for s in self.signers],
+            'approvals': []  # Will store signatures
+        }
+        
+        # Create condition (hash of transaction)
+        tx_bytes = json.dumps(transaction, sort_keys=True).encode()
+        condition = hashlib.sha256(tx_bytes).digest()
+        condition_b64 = base64.urlsafe_b64encode(condition).decode('utf-8')
+        
+        self.approvals[tx_id] = {
+            'transaction': transaction,
+            'condition': condition_b64,
+            'signatures': []
+        }
+        
+        print(f"\n📝 Created transaction: {tx_id}")
+        print(f"📌 Condition: {condition_b64[:30]}...")
+        print(f"👥 Required signatures: {self.required}")
+        
+        return {
+            'tx_id': tx_id,
+            'condition': condition_b64,
+            'transaction': transaction
+        }
+    
+    def sign_transaction(self, tx_id, signer_private_key_hex, signer_name):
+        """
+        Sign a transaction (simulated)
+        """
+        if tx_id not in self.approvals:
+            return {'error': 'Transaction not found'}
+        
+        # Simulate signing (in reality, would use proper crypto)
+        signature = hashlib.sha256(
+            f"{tx_id}{signer_private_key_hex}{time.time()}".encode()
+        ).hexdigest()[:32]
+        
+        # Store approval
+        self.approvals[tx_id]['signatures'].append({
+            'signer': signer_name,
+            'signature': signature,
+            'timestamp': time.time()
+        })
+        
+        current = len(self.approvals[tx_id]['signatures'])
+        print(f"\n✍️ {signer_name} signed transaction {tx_id}")
+        print(f"   Signatures: {current}/{self.required}")
+        
+        return {
+            'tx_id': tx_id,
+            'signature': signature,
+            'current_signatures': current,
+            'required': self.required
+        }
+    
+    def execute_transaction(self, tx_id):
+        """
+        Execute transaction if enough signatures collected
+        """
+        if tx_id not in self.approvals:
+            return {'success': False, 'error': 'Transaction not found'}
+        
+        tx_data = self.approvals[tx_id]
+        signatures = tx_data['signatures']
+        
+        if len(signatures) >= self.required:
+            print(f"\n✅ TRANSACTION EXECUTED: {tx_id}")
+            print(f"   Destination: {tx_data['transaction']['destination']}")
+            print(f"   Amount: {tx_data['transaction']['amount']}")
+            print(f"   Signatures provided: {len(signatures)}")
+            
+            return {
+                'success': True,
+                'transaction': tx_data['transaction'],
+                'signatures': signatures
+            }
+        else:
+            print(f"\n⏳ Insufficient signatures: {len(signatures)}/{self.required}")
+            return {
+                'success': False,
+                'error': 'Insufficient signatures',
+                'current': len(signatures),
+                'required': self.required
+            }
+    
+    def get_fulfillment(self, tx_id):
+        """
+        Get fulfillment data for a completed transaction
+        """
+        if tx_id not in self.approvals:
+            return None
+        
+        tx_data = self.approvals[tx_id]
+        if len(tx_data['signatures']) < self.required:
+            return None
+        
+        fulfillment = {
+            'condition': tx_data['condition'],
+            'signatures': [
+                {'signer': s['signer'], 'signature': s['signature']}
+                for s in tx_data['signatures'][:self.required]
+            ],
+            'transaction': tx_data['transaction']
+        }
+        
+        return fulfillment
+
+# Simulation
+print("\n" + "="*60)
+print("LAB 3: MULTI-SIGNATURE WALLET SIMULATION")
+print("="*60)
+
+# Create a 2-of-3 multisig wallet
+company_wallet = MultiSigWallet("CompanyFunds", required_signatures=2)
+
+# Add three signers
+company_wallet.add_signer("Alice", "pubkey_alice_123...")
+company_wallet.add_signer("Bob", "pubkey_bob_456...")
+company_wallet.add_signer("Charlie", "pubkey_charlie_789...")
+
+# Create a transaction
+print("\n" + "-"*40)
+print("Creating large payment requiring approval")
+tx = company_wallet.create_multisig_transaction(
+    destination="vendor_wallet_xyz",
+    amount="10000"
+)
+
+# Try to execute with insufficient signatures
+print("\n" + "-"*40)
+print("Attempt 1: Only Alice signs")
+company_wallet.sign_transaction(tx['tx_id'], "alice_privkey", "Alice")
+company_wallet.execute_transaction(tx['tx_id'])
+
+# Add second signature
+print("\n" + "-"*40)
+print("Attempt 2: Bob also signs")
+company_wallet.sign_transaction(tx['tx_id'], "bob_privkey", "Bob")
+result = company_wallet.execute_transaction(tx['tx_id'])
+
+# Get fulfillment
+if result['success']:
+    fulfillment = company_wallet.get_fulfillment(tx['tx_id'])
+    print("\n📦 Fulfillment data ready for ILP:")
+    print(json.dumps(fulfillment, indent=2))
+
+# Exercise: Try with different combinations
+print("\n📝 EXERCISE: Test Different Scenarios")
+print("-"*40)
+
+print("1. What if only 1 of 3 signs? - Transaction stays locked")
+print("2. What if Alice and Charlie sign? - Transaction executes")
+print("3. What if all three sign? - Still executes (only need 2)")
