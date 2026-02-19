@@ -1,1 +1,177 @@
+"""
+Lab 2: Ed25519 Signatures and Key Management
+Learn how ILP uses digital signatures for authentication
+"""
 
+import nacl.signing
+import nacl.encoding
+import hashlib
+import base64
+import json
+
+class Ed25519Wallet:
+    """
+    Simulates an ILP wallet using Ed25519 signatures
+    """
+    
+    def __init__(self, wallet_name="default"):
+        self.wallet_name = wallet_name
+        
+        # Generate new keypair
+        self.signing_key = nacl.signing.SigningKey.generate()
+        self.verify_key = self.signing_key.verify_key
+        
+        # Store in different formats
+        self.private_key_hex = self.signing_key.encode(
+            encoder=nacl.encoding.HexEncoder
+        ).decode('utf-8')
+        
+        self.public_key_hex = self.verify_key.encode(
+            encoder=nacl.encoding.HexEncoder
+        ).decode('utf-8')
+        
+        self.public_key_b64 = base64.urlsafe_b64encode(
+            self.verify_key.encode()
+        ).decode('utf-8')
+        
+        print(f"\n🔑 Created wallet: {wallet_name}")
+        print(f"📌 Public Key (hex): {self.public_key_hex[:32]}...")
+        print(f"📌 Public Key (b64): {self.public_key_b64[:20]}...")
+        print(f"🔐 Private Key (hex): {self.private_key_hex[:32]}... (KEEP SECRET!)")
+    
+    def sign_transaction(self, transaction_data):
+        """
+        Sign an ILP transaction with private key
+        """
+        # Convert transaction to bytes
+        if isinstance(transaction_data, dict):
+            tx_bytes = json.dumps(transaction_data, sort_keys=True).encode()
+        else:
+            tx_bytes = transaction_data.encode()
+        
+        # Create signature
+        signed = self.signing_key.sign(tx_bytes)
+        signature = signed.signature
+        signature_b64 = base64.urlsafe_b64encode(signature).decode('utf-8')
+        
+        # Create condition (hash of public key + transaction)
+        condition_data = self.public_key_hex + tx_bytes.hex()
+        condition = hashlib.sha256(condition_data.encode()).digest()
+        condition_b64 = base64.urlsafe_b64encode(condition).decode('utf-8')
+        
+        return {
+            'transaction': transaction_data,
+            'signature': signature_b64,
+            'condition': condition_b64,
+            'public_key': self.public_key_hex
+        }
+    
+    def verify_signature(self, transaction, signature_b64, public_key_hex):
+        """
+        Verify a transaction signature
+        """
+        try:
+            # Reconstruct verify key
+            verify_key_bytes = bytes.fromhex(public_key_hex)
+            verify_key = nacl.signing.VerifyKey(verify_key_bytes)
+            
+            # Decode signature
+            signature = base64.urlsafe_b64decode(signature_b64)
+            
+            # Prepare transaction bytes
+            if isinstance(transaction, dict):
+                tx_bytes = json.dumps(transaction, sort_keys=True).encode()
+            else:
+                tx_bytes = transaction.encode()
+            
+            # Verify
+            verify_key.verify(tx_bytes, signature)
+            
+            print(f"\n✅ Signature VALID")
+            return True
+            
+        except Exception as e:
+            print(f"\n❌ Signature INVALID: {e}")
+            return False
+    
+    def create_payment_condition(self, destination_pubkey, amount):
+        """
+        Create an ILP payment condition
+        """
+        payment_details = {
+            'destination': destination_pubkey,
+            'amount': amount,
+            'timestamp': str(int(time.time())),
+            'wallet': self.public_key_hex
+        }
+        
+        # Sign the payment details
+        signed = self.sign_transaction(payment_details)
+        
+        return {
+            'condition': signed['condition'],
+            'details': payment_details,
+            'signature': signed['signature']
+        }
+
+# Exercise 1: Create and Examine Keys
+print("\n📝 EXERCISE 1: Create Your First Wallet")
+print("-"*40)
+
+wallet1 = Ed25519Wallet("Alice")
+wallet2 = Ed25519Wallet("Bob")
+
+print(f"\n🔍 Key lengths:")
+print(f"Private key: {len(wallet1.private_key_hex)} hex chars (32 bytes)")
+print(f"Public key: {len(wallet1.public_key_hex)} hex chars (32 bytes)")
+
+# Exercise 2: Sign and Verify
+print("\n📝 EXERCISE 2: Sign and Verify a Transaction")
+print("-"*40)
+
+# Create a transaction
+transaction = {
+    'from': wallet1.public_key_hex[:16],
+    'to': wallet2.public_key_hex[:16],
+    'amount': '100',
+    'asset': 'XRP'
+}
+
+print(f"\nTransaction: {json.dumps(transaction, indent=2)}")
+
+# Sign with wallet1
+signed = wallet1.sign_transaction(transaction)
+print(f"\nSignature: {signed['signature'][:30]}...")
+
+# Verify with wallet1's public key
+print("\nVerifying with correct public key:")
+wallet1.verify_signature(transaction, signed['signature'], wallet1.public_key_hex)
+
+# Try to verify with wrong public key
+print("\nVerifying with WRONG public key (Bob's key):")
+wallet1.verify_signature(transaction, signed['signature'], wallet2.public_key_hex)
+
+# Exercise 3: Create Payment Condition
+print("\n📝 EXERCISE 3: Create ILP Payment Condition")
+print("-"*40)
+
+condition = wallet1.create_payment_condition(wallet2.public_key_hex, "1000")
+print(f"\nPayment Condition: {condition['condition'][:30]}...")
+print(f"Payment Details: {condition['details']}")
+
+# Exercise 4: Tamper Detection
+print("\n📝 EXERCISE 4: Tamper Detection")
+print("-"*40)
+
+original_tx = "send 100 XRP to Bob"
+print(f"Original: {original_tx}")
+
+# Sign original
+signed = wallet1.sign_transaction(original_tx)
+
+# Try to verify tampered message
+tampered_tx = "send 1000 XRP to Bob"
+print(f"Tampered: {tampered_tx}")
+
+print("\nVerifying tampered message:")
+wallet1.verify_signature(tampered_tx, signed['signature'], wallet1.public_key_hex)
