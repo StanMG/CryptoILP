@@ -1,0 +1,243 @@
+"""
+Lab 4: Secure Key Storage and Environment Configuration
+Learn how to securely store and access wallet keys
+"""
+
+import os
+import base64
+import json
+import hashlib
+from pathlib import Path
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2
+import getpass
+
+class SecureWalletStorage:
+    """
+    Demonstrates secure key storage practices
+    """
+    
+    def __init__(self, wallet_name):
+        self.wallet_name = wallet_name
+        self.env_prefix = f"ILP_WALLET_{wallet_name.upper()}"
+        
+    def generate_wallet_keys(self):
+        """
+        Generate new wallet keys
+        """
+        import nacl.signing
+        import nacl.encoding
+        
+        signing_key = nacl.signing.SigningKey.generate()
+        private_key = signing_key.encode(encoder=nacl.encoding.HexEncoder).decode('utf-8')
+        public_key = signing_key.verify_key.encode(encoder=nacl.encoding.HexEncoder).decode('utf-8')
+        
+        return {
+            'private_key': private_key,
+            'public_key': public_key
+        }
+    
+    def show_env_config(self):
+        """
+        Show how to configure environment variables
+        """
+        keys = self.generate_wallet_keys()
+        
+        print("\n" + "="*60)
+        print("ENVIRONMENT VARIABLE CONFIGURATION")
+        print("="*60)
+        print("\nSet these environment variables (never hardcode!):")
+        print("-"*40)
+        print(f"export {self.env_prefix}_PRIVATE_KEY={keys['private_key']}")
+        print(f"export {self.env_prefix}_PUBLIC_KEY={keys['public_key']}")
+        print(f"export {self.env_prefix}_SEED={os.urandom(16).hex()}")
+        
+        print("\nIn Python, access them like this:")
+        print("-"*40)
+        print("import os")
+        print(f"private_key = os.getenv('{self.env_prefix}_PRIVATE_KEY')")
+        print(f"public_key = os.getenv('{self.env_prefix}_PUBLIC_KEY')")
+        
+    def load_from_env(self):
+        """
+        Load keys from environment variables
+        """
+        private_key = os.getenv(f"{self.env_prefix}_PRIVATE_KEY")
+        public_key = os.getenv(f"{self.env_prefix}_PUBLIC_KEY")
+        
+        if not private_key or not public_key:
+            print(f"\n⚠️  Environment variables not set for {self.wallet_name}")
+            print(f"   Please set: {self.env_prefix}_PRIVATE_KEY and {self.env_prefix}_PUBLIC_KEY")
+            return None
+        
+        return {
+            'private_key': private_key,
+            'public_key': public_key
+        }
+    
+    def encrypt_wallet_file(self, password=None):
+        """
+        Encrypt wallet keys to a file
+        """
+        if not password:
+            password = getpass.getpass("Enter encryption password: ")
+        
+        # Generate keys
+        keys = self.generate_wallet_keys()
+        wallet_data = json.dumps(keys).encode()
+        
+        # Generate key from password
+        salt = os.urandom(16)
+        kdf = PBKDF2(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
+        f = Fernet(key)
+        
+        # Encrypt
+        encrypted_data = f.encrypt(wallet_data)
+        
+        # Save to file
+        filename = f"{self.wallet_name}.encrypted_wallet"
+        with open(filename, 'wb') as f:
+            f.write(salt + encrypted_data)
+        
+        print(f"\n✅ Wallet encrypted and saved to {filename}")
+        print(f"📍 File size: {len(encrypted_data) + 16} bytes")
+        print(f"⚠️  Remember your password! No recovery possible.")
+        
+        return filename
+    
+    def decrypt_wallet_file(self, filename, password=None):
+        """
+        Decrypt wallet from file
+        """
+        if not password:
+            password = getpass.getpass("Enter decryption password: ")
+        
+        # Read file
+        with open(filename, 'rb') as f:
+            salt = f.read(16)
+            encrypted_data = f.read()
+        
+        # Derive key
+        kdf = PBKDF2(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt,
+            iterations=100000,
+        )
+        key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
+        f = Fernet(key)
+        
+        try:
+            # Decrypt
+            decrypted = f.decrypt(encrypted_data)
+            keys = json.loads(decrypted)
+            print(f"\n✅ Wallet decrypted successfully!")
+            return keys
+        except Exception as e:
+            print(f"\n❌ Decryption failed: {e}")
+            return None
+    
+    def demonstrate_secure_memory(self):
+        """
+        Demonstrate secure memory handling (conceptual)
+        """
+        print("\n" + "="*60)
+        print("SECURE MEMORY HANDLING")
+        print("="*60)
+        print("""
+In production ILP implementations:
+
+1. Use 'secrecy' crate (Rust) or similar to zeroize keys from memory
+2. Implement Debug that redacts sensitive data
+3. Never log private keys or seeds
+4. Use locked memory to prevent swapping to disk
+        """)
+        
+        # Example of redacted output
+        class RedactedKey:
+            def __init__(self, key):
+                self.key = key
+            
+            def __repr__(self):
+                return "<redacted>"
+            
+            def get_for_signing(self):
+                # Only expose when needed
+                return self.key
+        
+        sample_key = "secret_key_123"
+        redacted = RedactedKey(sample_key)
+        print(f"\nNormal print: {sample_key}")
+        print(f"Redacted print: {redacted}")
+    
+    def practice_exercise(self):
+        """
+        Interactive exercise for students
+        """
+        print("\n" + "="*60)
+        print("PRACTICE EXERCISE")
+        print("="*60)
+        
+        print("\nScenario: You're deploying an ILP connector")
+        print("\nTask 1: Environment Variables")
+        print("Create a .env file with:")
+        print("ILP_WALLET_PROD_PRIVATE_KEY=your_private_key_here")
+        print("ILP_WALLET_PROD_PUBLIC_KEY=your_public_key_here")
+        
+        print("\nTask 2: Write secure loading code")
+        print("""
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # Load .env file
+
+def get_wallet_keys(wallet_name):
+    private = os.getenv(f"ILP_WALLET_{wallet_name}_PRIVATE_KEY")
+    public = os.getenv(f"ILP_WALLET_{wallet_name}_PUBLIC_KEY")
+    
+    if not private or not public:
+        raise ValueError("Keys not found in environment")
+    
+    return private, public
+        """)
+        
+        print("\nTask 3: Answer these questions")
+        print("1. Why shouldn't you commit .env files to git?")
+        print("2. How would you rotate keys in production?")
+        print("3. What's the difference between env vars and encrypted files?")
+
+# Run demonstrations
+print("\n" + "="*60)
+print("LAB 4: SECURE KEY STORAGE")
+print("="*60)
+
+# Demo 1: Environment Variables
+storage = SecureWalletStorage("DEMO")
+storage.show_env_config()
+
+# Demo 2: Encrypted File Storage
+print("\n" + "-"*40)
+print("ENCRYPTED FILE STORAGE DEMO")
+print("-"*40)
+
+# Create encrypted wallet
+filename = storage.encrypt_wallet_file(password="demo_password123")
+
+# Decrypt and verify
+print("\nAttempting to decrypt...")
+decrypted = storage.decrypt_wallet_file(filename, password="demo_password123")
+if decrypted:
+    print(f"Recovered public key: {decrypted['public_key'][:32]}...")
+
+# Demo 3: Secure Memory
+storage.demonstrate_secure_memory()
+
+# Demo 4: Interactive Practice
+storage.practice_exercise()
