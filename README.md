@@ -1,4 +1,5 @@
-# Core cryptographic libraries
+Core cryptographic libraries
+
 pip install pynacl                   # For Ed25519 signatures
 pip install cryptography        # For encryption and key management
 pip install base58                   # For base58 encoding
